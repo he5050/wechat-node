@@ -1,0 +1,24 @@
+{
+  "name": "wechat",
+  "version": "1.0.0",
+  "description": "基于node,微信开发",
+  "main": "app.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node --harmony app.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/he5050/wechat-node.git"
+  },
+  "author": "he5050",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/he5050/wechat-node/issues"
+  },
+  "homepage": "https://github.com/he5050/wechat-node#readme",
+  "devDependencies": {
+    "koa": "^2.1.0",
+    "sha1": "^1.1.1"
+  }
+}
