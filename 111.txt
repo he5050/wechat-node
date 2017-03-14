@@ -1,0 +1,34 @@
+   { method: 'POST',
+     url: '/?signature=1b0e12a9fe784f4df799ce21f568d22e245599e4&timestamp=148946
+7190&nonce=1273627616&openid=oFFz7wZ-csa9L8m4wS-4CIFznw_8',
+     header:
+      { 'user-agent': 'Mozilla/4.0',
+        accept: '*/*',
+        host: 'he5050_wecat.ngrok.cc',
+        pragma: 'no-cache',
+        'content-length': '277',
+        'content-type': 'text/xml' } },
+  response: { status: 404, message: 'Not Found', header: {} },
+  app: { subdomainOffset: 2, proxy: false, env: 'development' },
+  originalUrl: '/?signature=1b0e12a9fe784f4df799ce21f568d22e245599e4&timestamp=1
+489467190&nonce=1273627616&openid=oFFz7wZ-csa9L8m4wS-4CIFznw_8',
+  req: '<original node req>',
+  res: '<original node res>',
+  socket: '<original node socket>' }
+
+
+
+http://he5050_wecat.ngrok.cc/?signature=1b0e12a9fe784f4df799ce21f568d22e245599e4&timestamp=148946
+7190&nonce=1273627616&openid=oFFz7wZ-csa9L8m4wS-4CIFznw_8
+
+
+        <xml>
+                <ToUserName><![CDATA[gh_d12e5e6c8236]]></ToUserName>
+                <FromUserName><![CDATA[oFFz7wZ-csa9L8m4wS-4CIFznw_8]]></FromUser
+Name>
+                <CreateTime>1489467354249</CreateTime>
+                <MsgType><![CDATA[text]]></MsgType>
+
+                <Content><![CDATA[1111111111111]]></Content>
+
+        </xml>

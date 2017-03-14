@@ -19,6 +19,8 @@
   "homepage": "https://github.com/he5050/wechat-node#readme",
   "devDependencies": {
     "bluebird": "^3.5.0",
+    "ejs": "^2.5.6",
+    "heredoc": "^1.3.1",
     "koa": "^2.1.0",
     "raw-body": "^2.2.0",
     "request": "^2.81.0",

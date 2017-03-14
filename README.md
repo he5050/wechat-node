@@ -581,3 +581,464 @@ OK了,我们可以正常的获取到相关的参数,并服务也成功启动,接
 
 
 ![](http://p1.bpimg.com/567571/49b0fb254663fcde.png)
+
+***
+
+2.3. 前面说了这么多,来开始实战吧!,我们实现一个简单的关注功能自动回复功能!
+
+打开`connect.js`进行如下修改,在message后面添加以下内容:
+
+	//成功解析之后,判断用户行为,做出对应的判断
+			
+			if(message.MsgType === 'event'){
+				//如果是关注行为
+				if(message.Event === 'subscribe'){
+					console.log('有新的用户,关注了您!');
+					var now = new Date().getTime();
+					var msg = '感谢您的关注!';
+					_self.status = 200;
+					_self.type = 'application/xml';
+					var replyMsg = "<xml>";
+					replyMsg += "<ToUserName><![CDATA["+message.FromUserName+"]]></ToUserName>";
+					replyMsg += "<FromUserName><![CDATA["+message.ToUserName+"]]></FromUserName>";
+					replyMsg += "<CreateTime>"+now+"</CreateTime>";
+					replyMsg += "<MsgType><![CDATA[text]]></MsgType>";
+					replyMsg += "<Content><![CDATA["+msg+"]]></Content>";
+					replyMsg += "</xml>";
+					_self.body = replyMsg;
+					console.log(replyMsg);
+					//直接return返回
+					return ;
+				}else{
+					console.log('尴尬的是,又有用户离开你了!');
+				}
+
+
+成功关注后的效果如下:
+
+![](http://p1.bqimg.com/567571/8938e500aa8020a9.png)
+
+> 关于这个回复体的结构,请参考官方文档
+
+
+-  2.4. 实现了简单的关注功能后,我们是不是发现有两个问题
+
+  - 第一点是:这断XML代码的使用太麻烦了,而且不可复用。
+  - 第二点是:我们的`connect.js`文件,文件太复杂我们要把关于`wechat`这个类都独立出来
+  
+  我们在`lib`下面创建`wechat.js`,内容如下:
+  
+		var util=require('./util');
+		var Promise = require('bluebird');
+		var request = Promise.promisify(require('request'));
+		/*
+		 * 用于获取access_token
+		 */
+		function Wechat(opts){
+			//保存当前对象
+			var _self = this;
+			//获取当前的appID,appSecret,获取与保存accessToken的方法
+			this.appID = opts.appID;
+			this.appSecret = opts.appSecret;
+			this.getAccessToken = opts.getAccessToken;
+			this.saveAccessToken = opts.saveAccessToken;
+			this.urlAccessToken = opts.prefix+opts.urlAccessToken;
+			
+			//关于这里的不是很理解的话请自行查阅promise相关文档,promise主是要为了解决回调中的问题
+			this.getAccessToken()
+			  .then(function(data){
+			  	try{
+			  		//把获取到的内容转成json对象
+			  		data = JSON.parse(data);
+			  	}catch(e){
+			  		//如果获取异常
+			  		console.log(e.message);
+			  		//重新更新
+			  		return _self.updateAccessToken();
+			  	}
+			  	//成功获取到access_token之后,我们对其进行有效验证
+			  	if(_self.isValidAccessToken(data)){
+			  		//console.log('凭证验证通过');
+			  		//验证通过,继续传递下去
+			  		return Promise.resolve(data);
+			  	}else{
+			  		//验证不通过,重新更新access_token
+			  		return _self.updateAccessToken();
+			  	}
+			  })
+			  .then(function(data){
+			  	//console.log('成功获取到有效的凭证');
+			  	//console.log(data);
+			  	//能过上面的获取与验证,我们可以获取到正确的access_token
+			  	_self.access_token = data.access_token;
+			  	//凭证有效时间，单位：秒
+			  	_self.expires_in = data.expires_in;
+			  	//保存到我们凭证
+			  	_self.saveAccessToken(data);
+			  });
+		}
+		
+		/**下面来实现对应的方法 **/
+		
+		//1.验证方法
+		Wechat.prototype.isValidAccessToken = function (data){
+			if(!data || !data.access_token || !data.expires_in){
+				return false;
+			}
+			//获取数据
+			var access_token = data.access_token;
+			var expires_in = data.expires_in;
+			//获取当前时间
+			var now = (new Date().getTime());
+			if(now < expires_in){
+				//表示 还没有过期
+				return true;
+			}else{
+				return false;
+			}
+		}
+		
+		//2.更新方法
+		Wechat.prototype.updateAccessToken = function(){
+			var appID = this.appID;
+			var appSecret = this.appSecret;
+			var urlAT = this.urlAccessToken + '&appid=' + appID + '&secret=' + appSecret;
+			
+			//配置发送请求
+			var reqCon = {
+				url : urlAT,
+				json : true
+			};
+			//封装请求
+			return new Promise(function(resolve,reject){
+				//console.log('正在请求access_token');
+				//发送get请求
+				request(reqCon)
+					.then(function(response){
+						//console.log('正在获取凭据,结果如下:');
+						//console.log(response['body']);
+						//console.log(response[1]);
+						var data = response['body'];
+						var now = (new Date().getTime());
+						//考虑到会有延迟问题,所以我们设置 提前30秒刷新
+						var expire_in = now + (data.expires_in - 30)*1000;
+						
+						//把新的有效时间 传到data当中
+						data.expires_in = expire_in;
+						//成功就传递
+					    resolve(data);
+					});
+			});
+			
+		}
+		
+		
+		module.exports=Wechat
+
+
+在我们`connect.js`当中引入`wechat`这个文件;
+下面我们还要来解决代码复用的问题
+我们创建一个`tpl.js`,使用了`ejs`做为我们的模板引擎
+
+			'use strict'
+			
+			var ejs = require('ejs');
+			var heredoc = require('heredoc');
+			
+			var tpl = heredoc(function(){/*
+				<xml>
+					<ToUserName><![CDATA[<%= fromUserName %>]]></ToUserName>
+					<FromUserName><![CDATA[<%= toUserName %>]]></FromUserName>
+					<CreateTime><%= createTime %></CreateTime>
+					<MsgType><![CDATA[<%= msgType %>]]></MsgType>
+				<% if(msgType === 'text') { %>
+					<Content><![CDATA[<%= content %>]]></Content>
+				<% }else if(msgType === 'image'){ %>
+					<Image>
+						<MediaId><![CDATA[<%= content.media_id %>]]></MediaId>
+					</Image>
+				<% }else if(msgType === 'voice'){ %>
+					<Voice>
+						<MediaId><![CDATA[<%= content.media_id %>]]></MediaId>
+					</Voice>
+				<% }else if(msgType === 'video'){ %>
+					<Video>
+						<MediaId><![CDATA[<%= content.media_id%>]]></MediaId>
+						<Title><![CDATA[<%= content.title %>]]></Title>
+						<Description><![CDATA[<%= content.description %>]]></Description>
+					</Video> 
+				<% }else if(msgType === 'music'){ %>
+					<Music>
+						<Title><![CDATA[<%= content.title %>]]></Title>
+						<Description><![CDATA[<%= content.description %>]]></Description>
+						<MusicUrl><![CDATA[<%= content.MUSIC_Url %>]]></MusicUrl>
+						<HQMusicUrl><![CDATA[<%= content.HQ_MUSIC_Url %>]]></HQMusicUrl>
+						<ThumbMediaId><![CDATA[<%= content.media_id %>]]></ThumbMediaId>
+					</Music>
+				<% }else if(msgType === 'news'){ %>
+					<ArticleCount><%= content.length %></ArticleCount>
+					<Articles>
+					 <% content.forEach(function(item){ %>
+						<item>
+							<Title><![CDATA[<%= item.title %>]]></Title> 
+							<Description><![CDATA[<%= item.description %>]]></Description>
+							<PicUrl><![CDATA[<%= item.picUrl %>]]></PicUrl>
+							<Url><![CDATA[<%= item.url %>]]></Url>
+						</item>
+					<% }) %>	
+					</Articles>
+				<% } %>
+				</xml>	
+			*/});
+			//编译模版
+			var compiled = ejs.compile(tpl);
+			
+			exports = module.exports = {
+				compiled : compiled
+			}
+
+到这里,我们把上面的问题都解决了,但是我们又发现了一个,我们的`connect.js`,就是通信验证的功能,不用说在这里写
+上一大堆的回复方法,回复信息的。
+基本上面的两个,我们在创建一个`weixin.js`,专门用于回复内容的。
+
+			'use strict'
+			
+			exports.reply = function* (next) {
+				var message = this.weixin;
+				
+				if(message.MsgType === 'event'){
+					if(message.Event === 'subscribe'){
+						if(message.EventKey){
+							console.log('用户通过扫三维码进来的'+message.EventKey+'...'+message.ticket);
+							this.body = "小主,我可算找到了你\r\n";
+							console.log('小主,我可算找到了你\r\n');
+						}else{
+							this.body = "小主,我在这呢!\r\n";
+							console.log('小主,我在这呢!\r\n');
+						}
+					}else if(message.Event === 'unsubscribe'){
+						this.body = '';
+						console.log('陛下,不要抛弃臣妾!');
+					}else if(message.Event === 'LOCATION'){
+						this.body = '您上报的地理位置纬度:: '+ message.Latitude+' 经度: '+ 
+						message.Longitude+' 地理信息:'+ message.Precision;
+						console.log('我和你好近哦!');
+					}else if(message.Event ==='CLICK'){
+						this.body = '您点击了菜单:' + message.EventKey;
+						console.log('您弄疼我了!');
+					}else if(message.Event === 'SCAN'){
+						this.body = '您确定不陈老师' + message.EventKey+ '   ' + message.Ticket;
+						console.log('扫描我了,我暴露了');
+					}else if(message.Event === 'VIEW'){
+						this.body = '这连接有毒吧!'+message.EventKey;
+					}
+				}else if(message.MsgType === 'text'){
+					//回复普通文章
+					var content = message.Content;
+					var reply = '我好像,不是很明白' + content + '太复杂';
+					if(content === '1'){
+						reply = '水';
+					}else if(content === '2'){
+						reply = '金';
+					}else if(content === '3'){
+						reply = '土';
+					}else if(content === '4'){
+						reply = '火';
+					}else if(content === '5'){
+						reply = '木';
+					}else if(content === '6'){
+						//回复图文
+						reply = [
+						{
+							title : 'Range对象的使用',
+							description : '有很多东西,请自行查阅',
+							picUrl : 'http://img5q.duitang.com/uploads/item/201506/23/20150623203928_HzBWU.jpeg',
+							url : 'http://www.hhh1989.top/a/2.html'
+						},
+						{
+							title : 'HTML5 当中进度条 progress与meter的使用',
+							description : '手动开启与停用进度条 ',
+							picUrl : 'http://pic1.win4000.com/wallpaper/a/57a0131036064.jpg',
+							url : 'http://www.hhh1989.top/a/1.html'
+						}
+						];
+					}
+					this.body = reply;
+				}
+				yield next;
+			}
+
+
+在我们的`wechat.js`添加一个回复方法,专门用于回复的。
+
+		//回复方法
+		Wechat.prototype.reply = function(){
+			//回复的消息内容
+			var content = this.body;
+			//使用信息
+			var message = this.weixin;
+			//生成回复内容模板
+			var xml = util.tpl(content,message);
+		
+			this.status = 200;
+		    this.type = 'application/xml';
+		    this.body = xml;
+		    console.log(xml);
+		}
+
+
+现在我们需要在我们`工具类`当中来实现`tpl`方法
+
+		exports.tpl = function(content,message){
+			//用于临时存放回复内容
+			var info = {};
+			var type = 'text';
+			var fromUserName = message.FromUserName;
+			var toUserName = message.ToUserName;
+			
+			//如果是数组则是图文
+			if(Array.isArray(content)){
+				type = 'news';
+			}
+		//	type = content.type || type;
+			info.content = content;
+			info.createTime = new Date().getTime();
+			info.msgType = type;
+			info.toUserName = toUserName;
+			info.fromUserName = fromUserName;
+			
+			return tpl.compiled(info);
+		}
+
+
+结果如下:
+
+![](http://p1.bpimg.com/567571/3031d2de6c025446.png)
+
+
+一切都那么好!
+
+-  2.5. 完成上面的功能之后,我们来实现临时文件的上传功能
+ - 首先,在`config.js`添加 `upload : 'media/upload?'`, 临时素材上传接口路径
+ - 打开我们`wechat.js`,在里面我们来实现上传方法
+ 
+		 Wechat.prototype.fetchAccessToken = function(data){
+			var _self = this;
+			//判断token是否存并有效
+			if(this.access_token && this.expires_in){
+				if(this.isValidAccessToken(this)){
+					return Promise.resolve(this);
+				}
+			}
+			
+			this.getAccessToken()
+			  .then(function(data){
+			  	try{
+			  		//把获取到的内容转成json对象
+			  		data = JSON.parse(data);
+			  	}catch(e){
+			  		//如果获取异常
+			  		console.log(e.message);
+			  		//重新更新
+			  		return _self.updateAccessToken();
+			  	}
+			  	//成功获取到access_token之后,我们对其进行有效验证
+			  	if(_self.isValidAccessToken(data)){
+			  		//console.log('凭证验证通过');
+			  		//验证通过,继续传递下去
+			  		return Promise.resolve(data);
+			  	}else{
+			  		//验证不通过,重新更新access_token
+			  		return _self.updateAccessToken();
+			  	}
+			  })
+			  .then(function(data){
+			  	//console.log('成功获取到有效的凭证');
+			  	//console.log(data);
+			  	//能过上面的获取与验证,我们可以获取到正确的access_token
+			  	_self.access_token = data.access_token;
+			  	//凭证有效时间，单位：秒
+			  	_self.expires_in = data.expires_in;
+			  	//保存到我们凭证
+			  	_self.saveAccessToken(data);
+			  	return Promise.resolve(data);
+			  });
+			
+		}
+		//5. 上传方法
+		Wechat.prototype.upload = function(type,filePath){
+			var _self = this;
+			//构造一个表单 文件流
+			var form = {
+				media : fs.createReadStream(filePath)
+			}
+			//
+			var appID = this.appID;
+			var appSecret = this.appSecret;
+			var upUrl = this.uploadUrl;
+			return new Promise(function(resolve,reject){
+				_self.fetchAccessToken()
+				.then(function(data){
+				    var url = upUrl + 'access_token=' + data.access_token + '&type=' + type;
+					var Op = {
+						method : 'POST',
+						url : url,
+						formData : form,
+						json : true
+					};
+					request(Op).then(function(response){
+						var _data = response['body'];
+						console.log(_data);
+						if(_data){
+							resolve(_data);
+						}else{
+							throw new Error('上传出错!');
+						}
+					});
+				}).catch(function(err){
+					reject(err);
+				});
+			})
+		}
+
+> 下面我们在我们的`weixin.js`里面实现我们上传就可以了(这里是指的临时上传)
+
+
+ - 最后,打开我们`weixin.js`,添加如下代码:
+ 
+		var config = require('../config/config');
+		var Wechat = require('./wechat');
+		var wechatApi = new Wechat(config.wechat);
+ 
+			else if(content === '7'){
+						//回复上传图片(临时)
+						var data = yield wechatApi.upload('image',__dirname+'/../images/2.jpg');
+						reply = {
+							type : 'image',
+							mediaId:data.media_id
+						}
+					}else if(content === '8'){
+						//回复 上传视频(临时)
+						var data = yield wechatApi.upload('video',__dirname+'/../images/1.mp4');
+						reply = {
+							type : 'video',
+							title : '我回复了你的视频了',
+							description : '很暴力的哦',
+							mediaId : data.media_id
+						}
+					}else if(content === '9'){
+						//回复 并上传音乐(临时) 因为某种
+						var data = yield wechatApi.upload('image',__dirname+'/../images/2.jpg');
+						reply = {
+							type : 'music',
+							title : '发一点音乐你听一下',
+							description : '好听哦',
+							MUSIC_Url : 'http://www.hhh1989.top/upload/image/20170207/tfz-zmr.mp3',
+							HQ_MUSIC_Url : 'http://www.hhh1989.top/upload/image/20170207/tfz-zmr.mp3',
+							mediaId : data.media_id
+						}
+						
+
+我们来查看一下结果吧!
+
+![](http://i1.piimg.com/567571/4c90fd1072d2270b.png)
